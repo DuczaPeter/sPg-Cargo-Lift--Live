@@ -1,0 +1,1017 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SC Cargo Lift Live OCR V2.2</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+:root{--bg:#061014;--panel:#0d1d24;--panel2:#112932;--line:#254b58;--text:#ddf5ff;--muted:#91b9c9;--accent:#4bd8ff;--good:#70e69b;--bad:#ff6b78;--warn:#ffd26a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;line-height:1.45}header{padding:16px 20px;border-bottom:1px solid var(--line);background:#08171d;position:sticky;top:0;z-index:10}h1{font-size:20px;margin:0 0 4px;color:var(--accent)}h2{font-size:17px;margin:0 0 10px;color:var(--accent)}p{margin:6px 0;color:var(--muted)}main{padding:16px;max-width:1580px;margin:auto}.grid{display:grid;grid-template-columns:1.12fr .88fr;gap:14px;align-items:start}.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:14px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}button,select,input,textarea{border-radius:8px;border:1px solid var(--line);background:#09171d;color:var(--text);padding:9px 11px;font-size:14px}button{cursor:pointer;background:#123443}button:hover{background:#174d62}button.primary{background:#066287;border-color:#2cc1ed}button.good{background:#155a31;border-color:#46d37b}button.warn{background:#5e4612;border-color:#d5a948}button.bad{background:#5c1c24;border-color:#da5b69}button:disabled{opacity:.45;cursor:not-allowed}label{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center}input[type=number]{width:84px}input[type=range]{width:130px}textarea{width:100%;min-height:105px;resize:vertical;font-family:Consolas,monospace;font-size:13px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:7px;text-align:left;vertical-align:top}th{color:var(--accent);background:#0b2029}.stage{position:relative;background:#000;border:1px solid var(--line);border-radius:10px;overflow:hidden;min-height:220px}video{display:block;width:100%;height:auto;background:#000}.selection,.detectBox{position:absolute;border:2px solid #4bd8ff;background:rgba(75,216,255,.12);pointer-events:none;display:none}.detectBox{border-color:#ff4bd2;background:rgba(255,75,210,.10)}.hint,.small{font-size:12px;color:var(--muted)}.status{padding:9px 11px;background:#08171d;border:1px solid var(--line);border-radius:8px;color:var(--muted);min-height:38px}.pill{display:inline-block;padding:3px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:12px;margin:2px}.ok{color:var(--good)}.no{color:var(--bad)}.maybe{color:var(--warn)}canvas{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#000}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.four{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}.previewTitle{font-size:12px;color:var(--muted);margin:4px 0}@media(max-width:1100px){.grid,.two,.four{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+<h1>Star Citizen Cargo Lift Live OCR V2.1</h1>
+<p>Ez a verzió szigorúbb. A Q és az SCU csak a külön mezőkből jöhet. A teljes tooltip fallback csak debugra van, nem ment automatikusan hibás Q-t.</p>
+</header>
+<main>
+<div class="grid">
+<section>
+<div class="panel">
+<h2>1. Képernyő és keresési zóna</h2>
+<div class="row">
+<button id="btnCapture" class="primary">Képernyőmegosztás indítása</button>
+<button id="btnClearZone">Zóna törlése</button>
+<span id="videoInfo" class="pill">Nincs videó</span>
+</div>
+<p class="hint">A zónát a jobb oldali inventory részre húzd. Nem kell az egész monitor. A program a tooltip alsó anyagcímkéjét keresi. V2.2-ben az alsó tooltip sort is külön olvassa, hogy a Copper / Savrilium jellegű képeknél ne a kristály vigye el a felismerést.</p>
+<div id="stage" class="stage">
+<video id="video" autoplay muted playsinline></video>
+<div id="selection" class="selection"></div>
+<div id="detectBox" class="detectBox"></div>
+</div>
+</div>
+
+<div class="panel">
+<h2>2. OCR vezérlés</h2>
+<div class="row">
+<button id="btnInitOcr" class="primary">OCR motor betöltése</button>
+<button id="btnStart" class="good" disabled>Indít</button>
+<button id="btnStop" class="warn" disabled>Megállít</button>
+<button id="btnRecord" disabled>Most rögzít</button>
+<button id="btnFinish" class="primary">Vége és összesítés</button>
+</div>
+<div class="row">
+<label>OCR időköz ms <input id="ocrInterval" type="number" value="900" min="300" max="4000" step="50"></label>
+<label>Mező nagyítás <input id="scaleFactor" type="number" value="8" min="2" max="12" step="1"></label>
+<label>Stabil olvasás <input id="stableNeed" type="number" value="2" min="1" max="6" step="1"></label>
+<label>Eltűnés frame <input id="hideNeed" type="number" value="2" min="1" max="8" step="1"></label>
+</div>
+<div class="row">
+<label>Lila / tompa lila érzékenység <input id="purpleSensitivity" type="range" min="1" max="100" value="45"><span id="purpleVal">45</span></label>
+<label><input id="strictMode" type="checkbox" checked> Csak lila / tompa lila címkés tooltipet fogadjon el</label>
+<label><input id="showMask" type="checkbox"> Lila maszk előnézet</label>
+</div>
+<div class="status" id="status">Várakozás.</div>
+<p class="small">Space: most rögzít. Ctrl+Enter: vége. A program nem töröl azonos név, Q és SCU alapján.</p>
+</div>
+
+<div class="panel">
+<h2>3. Debug előnézet</h2>
+<div class="two">
+<div><p class="previewTitle">Keresési zóna</p><canvas id="zoneCanvas"></canvas></div>
+<div><p class="previewTitle">Talált tooltip környék</p><canvas id="tooltipCanvas"></canvas></div>
+</div>
+<div class="four">
+<div><p class="previewTitle">Anyag mező</p><canvas id="matCanvas"></canvas></div>
+<div><p class="previewTitle">Q mező</p><canvas id="qCanvas"></canvas></div>
+<div><p class="previewTitle">SCU mező</p><canvas id="scuCanvas"></canvas></div>
+<div><p class="previewTitle">Lila címke maszk</p><canvas id="maskCanvas"></canvas></div>
+</div>
+<p>Nyers OCR mezőszövegek és debug fallback</p>
+<textarea id="rawText" readonly></textarea>
+</div>
+</section>
+
+<aside>
+<div class="panel">
+<h2>Aktuális felismerés</h2>
+<div id="currentBox" class="status">Még nincs érvényes tooltip-adat.</div>
+<p class="small">Érvényes adat csak akkor van, ha a lila alsó anyagmezőből indulva külön mezőkből kijön az anyag, a Q és az SCU.</p>
+</div>
+
+<div class="panel">
+<h2>Tételes lista</h2>
+<div class="row"><button id="btnClearRows" class="bad">Tételes lista törlése</button><button id="btnDownloadRaw">Nyers CSV</button></div>
+<div style="max-height:350px;overflow:auto">
+<table id="rawTable"><thead><tr><th>#</th><th>Anyag</th><th>Q</th><th>SCU</th><th>Művelet</th></tr></thead><tbody></tbody></table>
+</div>
+</div>
+
+<div class="panel">
+<h2>Végső lista</h2>
+<p class="small">Csak anyag plusz Q-sáv alapján von össze.</p>
+<textarea id="summaryText" placeholder="A Vége gomb után ide kerül a lista."></textarea>
+<div class="row"><button id="btnCopySummary">Másolás</button><button id="btnDownloadSummary">TXT letöltés</button><button id="btnDownloadJson">JSON letöltés</button></div>
+</div>
+
+<div class="panel">
+<h2>Anyagnév szótár</h2>
+<p class="small">Az OCR anyagnevet ebből javítja. V1.7-ban a fallback nem adhat Q vagy SCU értéket. Csak debugra látszik.</p>
+<textarea id="materials"></textarea>
+</div>
+</aside>
+</div>
+</main>
+
+<script>
+
+'use strict';
+const el = id => document.getElementById(id);
+const video = el('video');
+const stage = el('stage');
+const selection = el('selection');
+const detectBox = el('detectBox');
+const canv = ids => ids.map(id => el(id));
+const [zoneCanvas, tooltipCanvas, matCanvas, qCanvas, scuCanvas, maskCanvas] = canv(['zoneCanvas','tooltipCanvas','matCanvas','qCanvas','scuCanvas','maskCanvas']);
+const FULL_TEXT_WHITELIST = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;()[]{}<>/\\-_+%#& QqSCUscu';
+const LETTER_WHITELIST = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+const NUMBER_WHITELIST = '0123456789., SCUscu';
+
+let stream = null;
+let worker = null;
+let ocrReady = false;
+let running = false;
+let timer = null;
+let isDragging = false;
+let dragStart = null;
+let zone = null;
+let rows = [];
+let rowId = 1;
+let currentCandidate = null;
+let lastSignature = '';
+let stableCount = 0;
+let lockedSignature = '';
+let hideCount = 0;
+let lastDetectionVideoBox = null;
+
+const defaultMaterials = ['Aluminum','Agricium','Astatine','Beryl','Bexalite','Borase','Copper','Corundum','Diamond','Dolivine','Gold','Hephaestanite','Iron','Laranite','Quartz','Quantanium','Riccite','Stileron','Taranite','Titanium','Tungsten','Janalite','Hadanite','Aphorite','Feynmaline','Saldynium','Savrilium','Lindinium','Ouratite','Pressurized Ice','Ice','Tin','Silicon','Carbon','Hydrogen','Nitrogen','Iodine','Chlorine','Fluorine','Neon','Argon','Krypton','Xenon'];
+el('materials').value = defaultMaterials.join('\n');
+el('purpleSensitivity').addEventListener('input', () => el('purpleVal').textContent = el('purpleSensitivity').value);
+
+function escapeHtml(s){return String(s ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c] || c));}
+function setStatus(msg, cls=''){el('status').innerHTML = cls ? `<span class="${cls}">${escapeHtml(msg)}</span>` : escapeHtml(msg);}
+function pad4(n){return (Math.round(Number(n)*10000)/10000).toFixed(4);}
+function nowTime(){return new Date().toLocaleTimeString('hu-HU');}
+function clamp(v,min,max){return Math.max(min, Math.min(max, v));}
+function getCtx(c){return c.getContext('2d',{willReadFrequently:true});}
+function resizeCanvas(c,w,h){c.width=Math.max(1,Math.round(w));c.height=Math.max(1,Math.round(h));}
+
+el('btnCapture').onclick = async () => {
+  try{
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){setStatus('A böngésző nem támogatja a képernyőmegosztást.', 'no');return;}
+    setStatus('Engedélykérés indul. Válaszd a játékablakot vagy a teljes képernyőt.', 'maybe');
+    if(stream){try{stream.getTracks().forEach(t=>t.stop());}catch(e){}}
+    stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+    video.srcObject = stream;
+    await new Promise(resolve => {
+      if(video.readyState >= 1) return resolve();
+      video.addEventListener('loadedmetadata', resolve, {once:true});
+      setTimeout(resolve, 1200);
+    });
+    await video.play().catch(()=>{});
+    updateVideoInfo();
+    setTimeout(updateVideoInfo,600);
+    const track = stream.getVideoTracks()[0];
+    if(track) track.onended = () => {stopOcr(); setStatus('Képernyőmegosztás leállt.', 'maybe');};
+    setStatus('Képernyőmegosztás aktív. Jelöld ki a jobb oldali inventory zónát.', 'ok');
+  }catch(err){setStatus('Képernyőmegosztás hiba: ' + (err.name || '') + ' ' + (err.message || err), 'no');}
+};
+function updateVideoInfo(){el('videoInfo').textContent = video.videoWidth ? `${video.videoWidth} × ${video.videoHeight}` : 'stream aktív';}
+
+el('btnClearZone').onclick = () => {zone=null; selection.style.display='none'; detectBox.style.display='none'; setStatus('Zóna törölve.', 'maybe');};
+
+function pointerToVideoRatio(ev){
+  const rect = video.getBoundingClientRect();
+  const x = clamp(ev.clientX - rect.left, 0, rect.width);
+  const y = clamp(ev.clientY - rect.top, 0, rect.height);
+  return {x:x/rect.width,y:y/rect.height,px:x,py:y,rect};
+}
+stage.addEventListener('pointerdown', ev => {
+  if(!video.videoWidth) return;
+  isDragging = true;
+  dragStart = pointerToVideoRatio(ev);
+  selection.style.display = 'block';
+  selection.style.left = dragStart.px + 'px';
+  selection.style.top = dragStart.py + 'px';
+  selection.style.width = '1px';
+  selection.style.height = '1px';
+});
+stage.addEventListener('pointermove', ev => {
+  if(!isDragging || !dragStart) return;
+  const p = pointerToVideoRatio(ev);
+  const rect = video.getBoundingClientRect();
+  const x1 = Math.min(dragStart.px,p.px), y1 = Math.min(dragStart.py,p.py);
+  const x2 = Math.max(dragStart.px,p.px), y2 = Math.max(dragStart.py,p.py);
+  Object.assign(selection.style,{left:x1+'px',top:y1+'px',width:(x2-x1)+'px',height:(y2-y1)+'px'});
+  zone = {x:x1/rect.width,y:y1/rect.height,w:(x2-x1)/rect.width,h:(y2-y1)/rect.height};
+});
+window.addEventListener('pointerup', () => {
+  if(!isDragging) return;
+  isDragging=false;
+  if(zone && zone.w>.02 && zone.h>.02) setStatus('Zóna beállítva. Most töltsd be az OCR motort.', 'ok');
+  else {zone=null; selection.style.display='none'; setStatus('A zóna túl kicsi volt.', 'maybe');}
+});
+
+el('btnInitOcr').onclick = async () => {
+  if(ocrReady) return;
+  if(typeof Tesseract === 'undefined'){setStatus('A Tesseract.js nem töltődött be. Internet kell a CDN-es verzióhoz.', 'no');return;}
+  el('btnInitOcr').disabled = true;
+  setStatus('OCR motor betöltése. Ez eltarthat pár másodpercig.', 'maybe');
+  try{
+    worker = await Tesseract.createWorker('eng', 1, {logger:m=>{if(m.status)setStatus(`OCR: ${m.status} ${m.progress ? Math.round(m.progress*100)+'%' : ''}`, 'maybe');}});
+    await worker.setParameters({preserve_interword_spaces:'1',tessedit_pageseg_mode:'7',tessedit_char_whitelist:FULL_TEXT_WHITELIST});
+    ocrReady = true;
+    el('btnStart').disabled = false;
+    el('btnRecord').disabled = false;
+    setStatus('OCR motor kész.', 'ok');
+  }catch(err){el('btnInitOcr').disabled=false; setStatus('OCR motor hiba: ' + (err.message || err), 'no');}
+};
+
+el('btnStart').onclick = () => {
+  if(!stream || !video.videoWidth){setStatus('Előbb indíts képernyőmegosztást.', 'no');return;}
+  if(!zone){setStatus('Előbb jelöld ki a keresési zónát.', 'no');return;}
+  if(!ocrReady){setStatus('Előbb töltsd be az OCR motort.', 'no');return;}
+  running=true;
+  el('btnStart').disabled=true;
+  el('btnStop').disabled=false;
+  setStatus('Élő OCR fut. Mozgasd az egeret ércről ércre.', 'ok');
+  loopOcr();
+};
+el('btnStop').onclick = stopOcr;
+function stopOcr(){running=false; if(timer) clearTimeout(timer); timer=null; el('btnStart').disabled=!ocrReady; el('btnStop').disabled=true;}
+async function loopOcr(){
+  if(!running) return;
+  const t0 = performance.now();
+  try{await processOnce(false);}catch(err){setStatus('OCR kör hiba: ' + (err.message || err), 'no');}
+  const delay = Math.max(50, Number(el('ocrInterval').value) - (performance.now()-t0));
+  timer = setTimeout(loopOcr, delay);
+}
+
+function drawZone(){
+  if(!zone || !video.videoWidth) return null;
+  const sx = Math.round(zone.x*video.videoWidth);
+  const sy = Math.round(zone.y*video.videoHeight);
+  const sw = Math.max(20, Math.round(zone.w*video.videoWidth));
+  const sh = Math.max(20, Math.round(zone.h*video.videoHeight));
+  resizeCanvas(zoneCanvas, sw, sh);
+  getCtx(zoneCanvas).drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+  return {sx,sy,sw,sh};
+}
+
+function isPurplePixel(r,g,b,sens){
+  const mx = Math.max(r,g,b);
+  const mn = Math.min(r,g,b);
+  const sat = mx - mn;
+
+  // Régi, élénk lila címke felismerés.
+  const purpleScore = r + b - 1.65*g;
+  const minScore = 55 + (100-sens)*0.8;
+  const brightPurple = r > 75 && b > 70 && sat > 25 && purpleScore > minScore && r > g*1.08 && b > g*0.85;
+
+  // V2.2: ködös, sárgás, sötétebb képeken a lila címke már nem élénk lila.
+  // Ilyenkor inkább tompa magenta/barna-lila lesz.
+  // A Savrilium példánál ez kellett, mert a régi maszk szinte semmit nem látott.
+  const mutedMagenta =
+    r > 70 && r < 215 &&
+    b > 65 && b < 205 &&
+    g > 40 && g < 175 &&
+    (r - g) > 16 &&
+    (b - g) > 0 &&
+    (r - b) > -18 &&
+    (r - b) < 70 &&
+    sat > 16;
+
+  return brightPurple || mutedMagenta;
+}
+
+function findPurpleLabels(crop){
+  const ctx = getCtx(zoneCanvas);
+  const w = zoneCanvas.width, h = zoneCanvas.height;
+  const img = ctx.getImageData(0,0,w,h);
+  const d = img.data;
+  const visited = new Uint8Array(w*h);
+  const maskCtx = getCtx(maskCanvas);
+  resizeCanvas(maskCanvas,w,h);
+  const mask = maskCtx.createImageData(w,h);
+  const md = mask.data;
+  const sens = Number(el('purpleSensitivity').value);
+  const good = new Uint8Array(w*h);
+
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const i = y*w+x, k=i*4;
+      const ok = isPurplePixel(d[k],d[k+1],d[k+2],sens);
+      if(ok){
+        good[i]=1;
+        md[k]=255; md[k+1]=0; md[k+2]=190; md[k+3]=255;
+      }else{
+        md[k]=md[k+1]=md[k+2]=0; md[k+3]=255;
+      }
+    }
+  }
+  maskCtx.putImageData(mask,0,0);
+
+  const comps = [];
+  const stack = [];
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const start = y*w+x;
+      if(!good[start] || visited[start]) continue;
+      let minX=x,maxX=x,minY=y,maxY=y,count=0;
+      stack.length=0;
+      stack.push(start);
+      visited[start]=1;
+      while(stack.length){
+        const idx = stack.pop();
+        count++;
+        const cx = idx % w, cy = (idx / w) | 0;
+        if(cx<minX)minX=cx;
+        if(cx>maxX)maxX=cx;
+        if(cy<minY)minY=cy;
+        if(cy>maxY)maxY=cy;
+        const nbs = [idx-1,idx+1,idx-w,idx+w];
+        for(const nb of nbs){
+          if(nb<0 || nb>=good.length || visited[nb] || !good[nb]) continue;
+          const nx = nb % w;
+          if(Math.abs(nx-cx)>1) continue;
+          visited[nb]=1;
+          stack.push(nb);
+        }
+      }
+      const bw=maxX-minX+1, bh=maxY-minY+1;
+      const area=bw*bh;
+      const ratio=bw/bh;
+      const fill=count/Math.max(1, area);
+
+      // V2.2: nem csak egyetlen „legjobb” lila jelöltet tartunk meg.
+      // A Copper képnél a rózsaszín kristály el tudta lopni a fókuszt.
+      // Ezért több jelöltet OCR-ezünk, és csak a valóban értelmes anyag+Q+SCU hármas nyer.
+      if(count>14 && bw>=16 && bw<=190 && bh>=6 && bh<=34 && ratio>=1.25 && ratio<=12 && fill>=0.40){
+        comps.push({x:minX,y:minY,w:bw,h:bh,count,area,ratio,fill});
+      }
+    }
+  }
+  if(!comps.length) return [];
+
+  function rectClamp(r){
+    const x = clamp(r.x, 0, w-1);
+    const y = clamp(r.y, 0, h-1);
+    const rw = Math.max(1, Math.min(r.w, w-x));
+    const rh = Math.max(1, Math.min(r.h, h-y));
+    return {x,y,w:rw,h:rh};
+  }
+
+  function regionStats(r){
+    r = rectClamp(r);
+    let dark=0, bright=0, total=0, purple=0;
+    const x2 = r.x+r.w, y2 = r.y+r.h;
+    for(let yy=r.y; yy<y2; yy++){
+      for(let xx=r.x; xx<x2; xx++){
+        const k=(yy*w+xx)*4;
+        const rr=d[k], gg=d[k+1], bb=d[k+2];
+        const lum = 0.299*rr + 0.587*gg + 0.114*bb;
+        if(lum<95) dark++;
+        if(lum>145) bright++;
+        if(isPurplePixel(rr,gg,bb,sens)) purple++;
+        total++;
+      }
+    }
+    return {dark, bright, purple, total, darkRatio:dark/Math.max(1,total), brightRatio:bright/Math.max(1,total), purpleRatio:purple/Math.max(1,total)};
+  }
+
+  for(const c of comps){
+    const rightRoom = w - (c.x+c.w);
+    const topRoom = c.y;
+    const panelProbe = {
+      x: c.x - Math.round(c.w*0.9),
+      y: c.y - Math.round(c.h*3.4),
+      w: Math.round(c.w*6.2),
+      h: Math.round(c.h*5.4)
+    };
+    const st = regionStats(panelProbe);
+    const around = regionStats({x:c.x-Math.round(c.w*.5), y:c.y-Math.round(c.h*.7), w:Math.round(c.w*2.3), h:Math.round(c.h*2.4)});
+    let score = 0;
+    score += c.fill * 1550;
+    score += Math.min(c.count, 1000) * 0.30;
+    score += Math.min(rightRoom, 420) * 0.08;
+    score += Math.min(topRoom, 160) * 0.04;
+    score += st.darkRatio * 700;
+    score += st.brightRatio * 260;
+    // A valódi címke többnyire alacsony, vízszintes, tömör.
+    if(c.h > 24) score -= (c.h-24) * 80;
+    if(c.w > 135) score -= (c.w-135) * 9;
+    if(c.fill < 0.60) score -= (0.60-c.fill) * 1300;
+    if(around.purpleRatio > 0.34 && c.fill < 0.78) score -= 700;
+    // Ha túl kevés hely van jobbra, nem fér el Q és SCU.
+    if(rightRoom < 70) score -= 800;
+    c.score = score;
+  }
+
+  return comps.sort((a,b)=>b.score-a.score).slice(0, 8);
+}
+
+function findPurpleLabel(crop){
+  const labels = findPurpleLabels(crop);
+  return labels.length ? labels[0] : null;
+}
+
+function inferFields(label, crop){
+  // V1.2: a lila alsó anyagcímke csak horgony.
+  // A horgony alapján külön, nagyobb mezőket vágunk ki.
+  const h = Math.max(10, label.h);
+  const w = Math.max(24, label.w);
+  const pad = Math.max(6, Math.round(h*0.45));
+
+  const rowY = clamp(label.y - Math.round(h*0.35), 0, zoneCanvas.height-1);
+  const rowH = clamp(Math.round(h*1.85), 22, 58);
+
+  // Anyag: felső cím + alsó lila címke. Ezeket később egy közös OCR képre rakjuk.
+  const title = {
+    x: clamp(label.x - Math.round(w*0.08), 0, zoneCanvas.width-1),
+    y: clamp(label.y - Math.round(h*3.35), 0, zoneCanvas.height-1),
+    w: clamp(Math.round(w*3.2), 70, 240),
+    h: clamp(Math.round(h*1.75), 22, 70)
+  };
+  title.w = Math.min(title.w, zoneCanvas.width-title.x);
+  title.h = Math.min(title.h, zoneCanvas.height-title.y);
+
+  const matLabel = {
+    x: clamp(label.x - pad, 0, zoneCanvas.width-1),
+    y: clamp(label.y - pad, 0, zoneCanvas.height-1),
+    w: clamp(label.w + pad*2, 36, 180),
+    h: clamp(label.h + pad*2, 18, 64)
+  };
+  matLabel.w = Math.min(matLabel.w, zoneCanvas.width-matLabel.x);
+  matLabel.h = Math.min(matLabel.h, zoneCanvas.height-matLabel.y);
+
+  // Q: közvetlenül a lila címke után.
+  const q = {
+    x: clamp(label.x + label.w + Math.round(w*0.10), 0, zoneCanvas.width-1),
+    y: rowY,
+    w: clamp(Math.round(w*1.25), 54, 130),
+    h: rowH
+  };
+  q.w = Math.min(q.w, zoneCanvas.width-q.x);
+  q.h = Math.min(q.h, zoneCanvas.height-q.y);
+
+  // SCU: a jobb alsó mennyiség. Nagyobb kivágás, hogy a 0.024 és az SCU is beleférjen.
+  const scu = {
+    x: clamp(label.x + label.w + Math.round(w*1.45), 0, zoneCanvas.width-1),
+    y: rowY,
+    w: clamp(Math.round(w*3.7), 120, 380),
+    h: rowH
+  };
+  scu.w = Math.min(scu.w, zoneCanvas.width-scu.x);
+  scu.h = Math.min(scu.h, zoneCanvas.height-scu.y);
+
+  // Tooltip környék: fallback OCR-hez is használjuk.
+  const tt = {
+    x: clamp(label.x - Math.round(w*0.9), 0, zoneCanvas.width-1),
+    y: clamp(label.y - Math.round(h*4.25), 0, zoneCanvas.height-1),
+    w: clamp(Math.round(w*6.4), 210, 560),
+    h: clamp(Math.round(h*6.2), 86, 190)
+  };
+  tt.w = Math.min(tt.w, zoneCanvas.width-tt.x);
+  tt.h = Math.min(tt.h, zoneCanvas.height-tt.y);
+  
+  const row = {
+    x: clamp(label.x - Math.round(w*0.20), 0, zoneCanvas.width-1),
+    y: clamp(rowY - Math.round(h*0.25), 0, zoneCanvas.height-1),
+    w: clamp(Math.round(w*6.6), 150, 420),
+    h: clamp(rowH + Math.round(h*0.35), 24, 76)
+  };
+  row.w = Math.min(row.w, zoneCanvas.width-row.x);
+  row.h = Math.min(row.h, zoneCanvas.height-row.y);
+
+  return {mat:matLabel,title,q,scu,row,tt,label};
+}
+
+function copyRect(srcCanvas, dstCanvas, r, scale=1, mode='normal'){
+  const sx=clamp(Math.round(r.x),0,srcCanvas.width-1), sy=clamp(Math.round(r.y),0,srcCanvas.height-1);
+  const sw=clamp(Math.round(r.w),1,srcCanvas.width-sx), sh=clamp(Math.round(r.h),1,srcCanvas.height-sy);
+  resizeCanvas(dstCanvas, sw*scale, sh*scale);
+  const ctx = getCtx(dstCanvas);
+  ctx.imageSmoothingEnabled = (mode === 'numberSoft' || mode === 'rawSoft' || mode === 'lettersSoft');
+  if(ctx.imageSmoothingEnabled && ctx.imageSmoothingQuality !== undefined) ctx.imageSmoothingQuality = 'high';
+  ctx.clearRect(0,0,dstCanvas.width,dstCanvas.height);
+  ctx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, dstCanvas.width, dstCanvas.height);
+  preprocess(dstCanvas, mode);
+}
+
+function copyMaterialComposite(srcCanvas, dstCanvas, titleRect, labelRect, scale=6){
+  // Két anyagnév-forrást adunk az OCR-nek: felső cím és alsó lila címke.
+  const rects = [titleRect, labelRect].map(r => ({
+    x:clamp(Math.round(r.x),0,srcCanvas.width-1),
+    y:clamp(Math.round(r.y),0,srcCanvas.height-1),
+    w:clamp(Math.round(r.w),1,srcCanvas.width-Math.round(r.x)),
+    h:clamp(Math.round(r.h),1,srcCanvas.height-Math.round(r.y))
+  }));
+  const outW = Math.max(...rects.map(r=>r.w))*scale;
+  const outH = (rects[0].h + rects[1].h + 10)*scale;
+  resizeCanvas(dstCanvas, outW, outH);
+  const ctx = getCtx(dstCanvas);
+  ctx.imageSmoothingEnabled = true;
+  if(ctx.imageSmoothingQuality !== undefined) ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0,0,dstCanvas.width,dstCanvas.height);
+  let y = 0;
+  for(const r of rects){
+    ctx.drawImage(srcCanvas, r.x, r.y, r.w, r.h, 0, y, r.w*scale, r.h*scale);
+    y += (r.h + 10)*scale;
+  }
+  preprocess(dstCanvas, 'textBright');
+}
+
+function preprocess(canvas, mode){
+  const ctx = getCtx(canvas);
+  const img = ctx.getImageData(0,0,canvas.width,canvas.height);
+  const d = img.data;
+  for(let i=0;i<d.length;i+=4){
+    const r=d[i], g=d[i+1], b=d[i+2];
+    const lum = 0.299*r+0.587*g+0.114*b;
+    let v;
+    if(mode==='raw'){
+      const nv = clamp((lum-105)*2.2+128, 0, 255);
+      d[i]=d[i+1]=d[i+2]=nv; d[i+3]=255;
+      continue;
+    }else if(mode==='digitLoose'){
+      // V2.2: Q mezőhöz. Világos számjegyeket keres,
+      // de engedékenyebb, mint a régi kemény számküszöb.
+      const isText = lum > 118 && (Math.max(r,g,b)-Math.min(r,g,b) < 170 || lum > 145);
+      v = isText ? 0 : 255;
+    }else if(mode==='digitSoft'){
+      // Lágyabb Q-kép. Ezt akkor használjuk, ha a keményítés pacává darálná a számot.
+      const nv = clamp((lum - 82) * 2.8, 0, 255);
+      v = 255 - nv;
+    }else if(mode==='numberSoft'){
+      // V1.3: lágy, antialiasos számos OCR. A világos HUD-szöveget sötétté tesszük,
+      // de nem daráljuk teljesen fekete-fehér pacává.
+      const textScore = Math.max(lum, (r+g+b)/3);
+      v = 255 - clamp((textScore - 112) * 2.6, 0, 245);
+      if(lum < 105) v = 255;
+    }else if(mode==='rawSoft'){
+      const nv = clamp((lum-95)*2.0+135, 0, 255);
+      d[i]=d[i+1]=d[i+2]=nv; d[i+3]=255;
+      continue;
+    }else if(mode==='number'){
+      const isText = lum > 162 || (g > 150 && r > 120 && b > 75);
+      v = isText ? 0 : 255;
+    }else if(mode==='textBright' || mode==='letters' || mode==='lettersSoft'){
+      const isText = lum > 145 && (Math.max(r,g,b)-Math.min(r,g,b) < 180 || lum > 178);
+      if(mode==='lettersSoft') v = isText ? clamp(255 - (lum-120)*2.2,0,255) : 255;
+      else v = isText ? 0 : 255;
+    }else{
+      const isText = lum > 150;
+      v = isText ? 0 : 255;
+    }
+    d[i]=d[i+1]=d[i+2]=v; d[i+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+}
+
+async function ocrCanvas(canvas, whitelist, psm='7'){
+  await worker.setParameters({preserve_interword_spaces:'1', tessedit_pageseg_mode:psm, tessedit_char_whitelist:whitelist});
+  const res = await worker.recognize(canvas);
+  return (res && res.data && res.data.text ? res.data.text : '').trim();
+}
+
+async function ocrBest(canvas, whitelist, psmList=['7','6']){
+  const outs = [];
+  for(const psm of psmList){
+    try{
+      const t = await ocrCanvas(canvas, whitelist, psm);
+      if(t && !outs.includes(t)) outs.push(t);
+    }catch(e){}
+  }
+  return outs.join('\n');
+}
+
+
+function makeTempRectCanvas(srcCanvas, r, scale=8, mode='numberSoft'){
+  const c = document.createElement('canvas');
+  const sx = clamp(Math.round(r.x), 0, srcCanvas.width - 1);
+  const sy = clamp(Math.round(r.y), 0, srcCanvas.height - 1);
+  const sw = clamp(Math.round(r.w), 1, srcCanvas.width - sx);
+  const sh = clamp(Math.round(r.h), 1, srcCanvas.height - sy);
+  resizeCanvas(c, sw * scale, sh * scale);
+  const ctx = c.getContext('2d', {willReadFrequently:true});
+  ctx.imageSmoothingEnabled = true;
+  if(ctx.imageSmoothingQuality !== undefined) ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  preprocess(c, mode);
+  return c;
+}
+
+async function ocrNumberFieldMulti(rect){
+  const scale = Number(el('scaleFactor').value) || 8;
+  const variants = [
+    makeTempRectCanvas(zoneCanvas, rect, scale, 'numberSoft'),
+    makeTempRectCanvas(zoneCanvas, rect, scale + 2, 'numberSoft'),
+    makeTempRectCanvas(zoneCanvas, rect, scale, 'number'),
+    makeTempRectCanvas(zoneCanvas, rect, scale, 'rawSoft')
+  ];
+  const outs = [];
+  const whitelist = '0123456789.,SCUscuOIl|![]()HhLlSsBbGgqQ';
+  for(const c of variants){
+    for(const psm of ['7','8','13','6']){
+      try{
+        const t = await ocrCanvas(c, whitelist, psm);
+        if(t && !outs.includes(t)) outs.push(t);
+      }catch(e){}
+    }
+  }
+  return outs.join('\n');
+}
+
+function expandRect(r, dx, dy){
+  return {
+    x: r.x - dx,
+    y: r.y - dy,
+    w: r.w + dx * 2,
+    h: r.h + dy * 2
+  };
+}
+
+async function ocrQFieldMulti(rect){
+  // V2.2: a Q mező csak szám. Nem engedünk betűket,
+  // mert a korábbi betűs whitelistből lett s, Cs, Cus, LL.
+  const scale = Number(el('scaleFactor').value) || 8;
+  const r = expandRect(rect, Math.round(rect.w * 0.10), Math.round(rect.h * 0.18));
+  const variants = [
+    makeTempRectCanvas(zoneCanvas, r, scale + 2, 'digitLoose'),
+    makeTempRectCanvas(zoneCanvas, r, scale + 3, 'digitSoft'),
+    makeTempRectCanvas(zoneCanvas, r, scale + 2, 'numberSoft'),
+    makeTempRectCanvas(zoneCanvas, r, scale + 2, 'number'),
+    makeTempRectCanvas(zoneCanvas, r, scale + 2, 'rawSoft')
+  ];
+  const outs = [];
+  const whitelist = '0123456789';
+  for(const c of variants){
+    for(const psm of ['7','8','13','10','6']){
+      try{
+        const t = await ocrCanvas(c, whitelist, psm);
+        if(t && !outs.includes(t)) outs.push(t);
+      }catch(e){}
+    }
+  }
+  return outs.join('\n');
+}
+
+async function processOnce(force){
+  const crop = drawZone();
+  if(!crop) return;
+
+  const labels = findPurpleLabels(crop);
+  if(!labels.length){
+    detectBox.style.display='none';
+    const parsed = {valid:false, reason:'Nem talált lila vagy tompa lila alsó anyagcímkét.'};
+    currentCandidate=null;
+    showCurrent(parsed);
+    handleStability(parsed, force);
+    el('rawText').value = 'Nincs lila címke jelölt.';
+    return;
+  }
+
+  let chosen = null;
+  let chosenDebug = null;
+  let bestInvalid = null;
+  let bestInvalidDebug = null;
+  let bestInvalidScore = -1;
+
+  // V2.2: több lila jelöltet is kipróbálunk.
+  // A tooltip alsó sorát is külön OCR-ezzük, ezért a Copper képen
+  // a 359 és a 2 SCU nagyobb eséllyel kijön.
+  const maxLabels = 12;
+  for(const label of labels.slice(0, maxLabels)){
+    const fields = inferFields(label, crop);
+
+    copyRect(zoneCanvas, tooltipCanvas, fields.tt, 3, 'normal');
+    copyMaterialComposite(zoneCanvas, matCanvas, fields.title, fields.mat, Number(el('scaleFactor').value));
+    copyRect(zoneCanvas, qCanvas, fields.q, Number(el('scaleFactor').value), 'numberSoft');
+    copyRect(zoneCanvas, scuCanvas, fields.scu, Number(el('scaleFactor').value), 'numberSoft');
+
+    const matText = await ocrBest(matCanvas, LETTER_WHITELIST, ['7','6','11']);
+    const qText = await ocrQFieldMulti(fields.q);
+    const scuText = await ocrNumberFieldMulti(fields.scu);
+    const tooltipText = await ocrBest(tooltipCanvas, FULL_TEXT_WHITELIST, ['6','11']);
+    const rowCanvas = makeTempRectCanvas(zoneCanvas, fields.row, Number(el('scaleFactor').value), 'textBright');
+    const rowText = await ocrBest(rowCanvas, FULL_TEXT_WHITELIST, ['7','6','11']);
+
+    const parsed = parseFields(matText, qText, scuText, fields, tooltipText, rowText);
+    const debugText = `JELÖLT score=${Math.round(label.score || 0)} x=${label.x} y=${label.y} w=${label.w} h=${label.h}\n\nALSÓ TOOLTIP SOR:\n${rowText}\n\nANYAG MEZŐ:\n${matText}\n\nQ MEZŐ:\n${qText}\n\nSCU MEZŐ:\n${scuText}\n\nTELJES TOOLTIP FALLBACK:\n${tooltipText}`;
+
+    let partialScore = 0;
+    if(parsed.material) partialScore += 3;
+    if(parsed.q !== null && parsed.q >= 100 && parsed.q <= 1000) partialScore += 3;
+    if(parsed.scu !== null && parsed.scu > 0 && parsed.scu <= 1000) partialScore += 3;
+    if(label.score) partialScore += Math.min(2, label.score / 1200);
+
+    if(parsed.valid){
+      chosen = parsed;
+      chosenDebug = debugText;
+      showDetectedOverlay(crop, fields.tt);
+      break;
+    }
+
+    if(partialScore > bestInvalidScore){
+      bestInvalidScore = partialScore;
+      bestInvalid = parsed;
+      bestInvalidDebug = debugText;
+      showDetectedOverlay(crop, fields.tt);
+    }
+  }
+
+  const parsed = chosen || bestInvalid || {valid:false, reason:'Nem sikerült értelmes anyag, Q és SCU hármast olvasni.'};
+  el('rawText').value = chosenDebug || bestInvalidDebug || 'Nincs OCR debug.';
+  currentCandidate = parsed.valid ? parsed : null;
+  showCurrent(parsed);
+  handleStability(parsed, force);
+}
+
+function showDetectedOverlay(crop, tt){
+  const rect = video.getBoundingClientRect();
+  const x = (crop.sx + tt.x) / video.videoWidth * rect.width;
+  const y = (crop.sy + tt.y) / video.videoHeight * rect.height;
+  const w = tt.w / video.videoWidth * rect.width;
+  const h = tt.h / video.videoHeight * rect.height;
+  Object.assign(detectBox.style,{display:'block',left:x+'px',top:y+'px',width:w+'px',height:h+'px'});
+  lastDetectionVideoBox = {x:crop.sx+tt.x,y:crop.sy+tt.y,w:tt.w,h:tt.h};
+}
+
+function parseFields(matText,qText,scuText,fields,tooltipText='',rowText=''){
+  const fallback = parseWholeTooltip(tooltipText);
+
+  // V2.2 fő szabály.
+  // A teljes tooltip fallback továbbra is csak debug.
+  // A tooltip ALSÓ SORA viszont érvényes forrás, mert abban van: anyag | Q | SCU.
+  const matInfo = detectMaterial((matText || '') + '\n' + (rowText || '') + '\n' + (fallback.materialText || ''));
+  const q = cleanInt(qText) ?? cleanInt(rowText);
+  const scu = cleanScu(scuText) ?? cleanScu(rowText);
+
+  const missing=[];
+  if(!matInfo.name) missing.push('anyag');
+  if(q===null || q<100 || q>1000) missing.push('Q');
+  if(scu===null || scu<=0 || scu>1000) missing.push('SCU');
+
+  const valid = missing.length===0;
+  return {
+    valid,
+    material:matInfo.name || '',
+    q,
+    scu,
+    materialDebug:matInfo,
+    raw:`ROW=${rowText}; MAT=${matText}; Q=${qText}; SCU=${scuText}; TOOLTIP=${tooltipText}`,
+    fields,
+    fallback,
+    reason: valid ? 'OK' : 'Hiányzó vagy hibás mezőadat: '+missing.join(', ')
+  };
+}
+
+function parseWholeTooltip(text){
+  const clean = String(text || '').replace(/\r/g,'\n').replace(/[|]/g,'I').replace(/[Oo]/g,'0');
+  const lines = clean.split(/\n+/).map(x=>x.trim()).filter(Boolean);
+  const joined = lines.join(' ');
+  const out = {materialText:clean, q:null, scu:null};
+
+  // SCU: minden SCU előtti számot kigyűjtünk, de a Capacity sort kihagyjuk.
+  const scuVals = [];
+  for(const line of lines){
+    if(/capacity/i.test(line)) continue;
+    const re = /([0-9]+(?:[\.,][0-9]+)?)\s*S?\s*C?\s*U/ig;
+    let m;
+    while((m = re.exec(line))){
+      const v = cleanScu(m[1]);
+      if(v !== null && v > 0 && v <= 1000) scuVals.push(v);
+    }
+  }
+  if(scuVals.length) out.scu = scuVals[scuVals.length-1];
+
+  // Q: a tooltip alsó sorában általában 3 vagy 4 számjegy, 0 és 1000 között.
+  // A Capacity 1.00 nem Q. Az SCU értékeket sem vesszük.
+  const qCandidates = [];
+  for(const line of lines){
+    if(/capacity|scu/i.test(line)) continue;
+    const nums = line.match(/\b\d{2,4}\b/g) || [];
+    for(const n of nums){
+      const v = Number(n);
+      if(Number.isFinite(v) && v>=0 && v<=1000) qCandidates.push(v);
+    }
+  }
+  if(qCandidates.length) out.q = qCandidates[qCandidates.length-1];
+
+  // Ha a sorok túl rosszak, keressünk olyan mintát, ahol anyagnév után jön egy Q-szerű szám.
+  if(out.q === null){
+    const nums = joined.match(/\b\d{2,4}\b/g) || [];
+    const vals = nums.map(Number).filter(v=>Number.isFinite(v) && v>=0 && v<=1000);
+    if(vals.length) out.q = vals[vals.length-1];
+  }
+  return out;
+}
+
+function detectMaterial(text){
+  const materials = getMaterialList();
+  const raw = String(text || '');
+  const tokens = raw
+    .split(/[^A-Za-z]+/)
+    .map(x=>x.trim())
+    .filter(x=>x.length>=2 && x.length<=24);
+  // A teljes szöveg is jelölt, de a tokenek fontosabbak.
+  const candidates = [...tokens, raw];
+  let best={name:'',confidence:0,seen:raw,method:'none'};
+  for(const cand of candidates){
+    const clean = normalizeMaterialKey(cand);
+    if(!clean || clean.length < 2) continue;
+    for(const name of materials){
+      const mn = normalizeMaterialKey(name);
+      let score=0;
+      if(clean===mn) score=1;
+      else if(mn.length>=4 && clean===mn.slice(1)) score=.96;       // Iron -> ron
+      else if(mn.length>=5 && clean===mn.slice(0,-1)) score=.92;    // Stileron -> stilero
+      else if(clean.includes(mn) && mn.length>=4) score=.94;
+      else if(mn.includes(clean) && clean.length>=3) score=.88;
+      else if(clean.length>=3){
+        const dist = levenshtein(clean,mn);
+        const ratio = 1 - dist / Math.max(clean.length,mn.length);
+        if(ratio>.70) score=ratio;
+      }
+      if(mn.length<=3 && clean!==mn) score=0;
+      if(score>best.confidence) best={name,confidence:score,seen:cand,method:score===1?'exact':'fuzzy-token'};
+    }
+  }
+  if(best.confidence>=.70) return best;
+  return {name:'',confidence:0,seen:raw,method:'none'};
+}
+function getMaterialList(){return el('materials').value.split(/\n+/).map(s=>s.trim()).filter(Boolean).sort((a,b)=>b.length-a.length);}
+function normalizeMaterialKey(s){return String(s||'').toLowerCase().replace(/[0]/g,'o').replace(/[1!|]/g,'i').replace(/[^a-z]/g,'');}
+function levenshtein(a,b){const dp=Array.from({length:a.length+1},()=>Array(b.length+1).fill(0));for(let i=0;i<=a.length;i++)dp[i][0]=i;for(let j=0;j<=b.length;j++)dp[0][j]=j;for(let i=1;i<=a.length;i++){for(let j=1;j<=b.length;j++){const cost=a[i-1]===b[j-1]?0:1;dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+cost);}}return dp[a.length][b.length];}
+function normalizeOcrDigits(s){
+  return String(s||'')
+    .replace(/[OoQq]/g,'0')
+    .replace(/[Il|!]/g,'1')
+    .replace(/[Ss]/g,'5')
+    .replace(/[Bb]/g,'8')
+    .replace(/[Gg]/g,'6')
+    .replace(/[Hh]/g,'9')
+    .replace(/[\[\(]/g,'9')
+    .replace(/[\]\)]/g,'8');
+}
+function cleanInt(s){
+  // V2.2: Q csak tiszta 3 vagy 4 jegyű szám lehet.
+  // Nem javítunk betűkből számot, mert abból lett korábban Q 150.
+  // Ha nincs tiszta 918 vagy 756 jellegű érték, inkább ne mentsen.
+  const original = String(s || '');
+  const candidates = [];
+  let seq = 0;
+  const lines = original.split(/\n+/).map(x => x.trim()).filter(Boolean);
+  for(const line of lines){
+    const matches = line.match(/\b\d{3,4}\b/g) || [];
+    for(const m of matches){
+      const n = Number(m);
+      if(!Number.isFinite(n) || n < 100 || n > 1000) continue;
+      let score = 10;
+      if(m.length === 3) score += 4;
+      if(m.length === 4) score += 2;
+      candidates.push({value:n, score, first:seq++, raw:m});
+    }
+  }
+
+  if(!candidates.length) return null;
+
+  const map = new Map();
+  for(const c of candidates){
+    if(!map.has(c.value)) map.set(c.value, {value:c.value, score:0, count:0, first:c.first});
+    const it = map.get(c.value);
+    it.score += c.score;
+    it.count += 1;
+    it.first = Math.min(it.first, c.first);
+  }
+  const arr = [...map.values()].sort((a,b) => b.score - a.score || b.count - a.count || a.first - b.first);
+  return arr[0].value;
+}
+
+function cleanScu(s){
+  // SCU mező javítás.
+  // Az OCR gyakran gyárt ilyen szemetet: 03sscu, c3scu, c3lscu.
+  // Ezeket nem szabad 3 SCU-nak venni.
+  // Elsőbbség: tizedes érték SCU mellett. Példa: 0.328SCU vagy 0,024 SCU.
+  // Második: tiszta egész szám SCU mellett. Példa: 1 SCU vagy 25 SCU.
+  const text = String(s || '').replace(/\r/g, '\n');
+  const candidates = [];
+  let seq = 0;
+
+  function fixNum(str){
+    const fixed = String(str || '')
+      .replace(/[OoQq]/g, '0')
+      .replace(/[Il|!]/g, '1')
+      .replace(/[Ss]/g, '5')
+      .replace(/[Bb]/g, '8')
+      .replace(/[Gg]/g, '6')
+      .replace(',', '.');
+    const n = Number(fixed.replace(/[^0-9.]/g, ''));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function hasScuNear(t, index, len){
+    const after = t.slice(index + len, index + len + 12);
+    const before = t.slice(Math.max(0, index - 4), index);
+    return /s\s*c\s*u|5\s*c\s*u|scl|scu|cu/i.test(after) || /s\s*c\s*u|5\s*c\s*u|scl|scu/i.test(before);
+  }
+
+  const lines = text.split(/\n+/).map(x => x.trim()).filter(Boolean);
+  for(const line of lines){
+    const lineLower = line.toLowerCase();
+    const isCapacity = /capacity|capaclty|capacty|capecity|copacity/.test(lineLower);
+
+    // 1. Tizedes SCU. Ez a legerősebb jelölt.
+    // 0.328SCU, 0,328 SCU, 0.024 SCU.
+    let reDec = /[0Oo][\.,][0-9OIl|!BbGgHh]{1,4}/g;
+    let m;
+    while((m = reDec.exec(line))){
+      const n = fixNum(m[0]);
+      if(n === null || n <= 0 || n > 1000) continue;
+      let score = 100;
+      if(hasScuNear(line, m.index, m[0].length)) score += 40;
+      if(!isCapacity) score += 10;
+      const frac = String(m[0]).split(/[\.,]/)[1] || '';
+      if(frac.length >= 3) score += 10;
+      // Capacity 1.00 nem a hasznos mennyiség.
+      if(isCapacity && Math.abs(n - 1) < 0.00001) score -= 120;
+      candidates.push({ value:n, score, first:seq++, raw:m[0], kind:'decimal' });
+    }
+
+    // 2. Pont nélküli, de valószínű decimális OCR.
+    // Példa: 0328SCU -> 0.328, 0024SCU -> 0.024.
+    // A 03SCU túl rövid és túl bizonytalan, ezért nem fogadjuk el.
+    let reLostDot = /(^|[^A-Za-z0-9])([0Oo][0-9OIl|!BbGgHh]{2,4})\s*(?:s\s*c\s*u|5\s*c\s*u|scl|scu|cu)/ig;
+    while((m = reLostDot.exec(line))){
+      const rawNum = m[2];
+      const digits = normalizeOcrDigits(rawNum).replace(/[^0-9]/g, '');
+      if(digits.length < 3) continue;
+      const n = Number('0.' + digits.slice(1));
+      if(!Number.isFinite(n) || n <= 0 || n > 1000) continue;
+      candidates.push({ value:n, score:75, first:seq++, raw:rawNum, kind:'lost-dot-decimal' });
+    }
+
+    // 3. Egész SCU. Példa: 1 SCU, 25 SCU.
+    // Fontos: 03sscu és c3scu nem mehet át.
+    let reInt = /(^|[^A-Za-z0-9])([1-9][0-9]{0,2})\s*(?:s\s*c\s*u|5\s*c\s*u|scl|scu|cu)\b/ig;
+    while((m = reInt.exec(line))){
+      const n = Number(m[2]);
+      if(!Number.isFinite(n) || n <= 0 || n > 1000) continue;
+      let score = 55;
+      if(!isCapacity) score += 5;
+      candidates.push({ value:n, score, first:seq++, raw:m[2], kind:'integer' });
+    }
+  }
+
+  // 4. Kézi javításhoz engedjük a tiszta számot is.
+  const manual = text.trim().replace(',', '.');
+  if(/^\d+(?:\.\d+)?$/.test(manual)){
+    const n = Number(manual);
+    if(Number.isFinite(n) && n > 0 && n <= 1000){
+      candidates.push({ value:n, score:45, first:seq++, raw:manual, kind:'manual' });
+    }
+  }
+
+  if(!candidates.length) return null;
+  candidates.sort((a,b) => b.score - a.score || a.first - b.first);
+  return candidates[0].value;
+}
+
+function signature(p){return p && p.valid ? `${p.material}|${p.q}|${pad4(p.scu)}` : '';}
+function showCurrent(p){
+  if(p.valid){el('currentBox').innerHTML = `<b class="ok">Érvényes olvasás</b><br>Anyag: <b>${escapeHtml(p.material)}</b><br>Q: <b>${p.q}</b><br>SCU: <b>${pad4(p.scu)}</b><br><span class="small">Anyagnév mód: ${escapeHtml(p.materialDebug.method)} / ${escapeHtml(p.materialDebug.seen)}</span><br><span class="small">Fallback csak debug: ${p.fallback ? ('Q=' + p.fallback.q + ', SCU=' + p.fallback.scu) : '-'}</span>`;}
+  else{el('currentBox').innerHTML = `<span class="maybe">Nincs teljes tooltip adat.</span><br>${escapeHtml(p.reason || '')}`;}
+}
+function handleStability(parsed, force){
+  const sig = signature(parsed);
+  if(!sig){hideCount++; if(hideCount>=Number(el('hideNeed').value)){lockedSignature=''; stableCount=0; lastSignature='';} return;}
+  hideCount=0;
+  if(sig===lastSignature) stableCount++; else {lastSignature=sig; stableCount=1;}
+  if(force){addRow(parsed,'manual'); lockedSignature=sig; return;}
+  if(stableCount>=Number(el('stableNeed').value) && sig!==lockedSignature){addRow(parsed,'auto'); lockedSignature=sig;}
+}
+function addRow(p, source){rows.push({id:rowId++, material:p.material, q:p.q, scu:Number(p.scu), raw:p.raw, source, time:nowTime()}); renderRows(); setStatus(`Rögzítve: ${p.material} | Q ${p.q} | ${pad4(p.scu)} SCU`, 'ok');}
+
+el('btnRecord').onclick = async () => {if(currentCandidate && currentCandidate.valid) handleStability(currentCandidate,true); else {await processOnce(true); if(currentCandidate && currentCandidate.valid) handleStability(currentCandidate,true); else setStatus('Nincs rögzíthető érvényes adat.', 'no');}};
+function renderRows(){
+  const tbody=el('rawTable').querySelector('tbody'); tbody.innerHTML='';
+  for(const r of rows){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${r.id}<br><span class="small">${escapeHtml(r.source)}</span></td><td contenteditable="true" data-field="material" data-id="${r.id}">${escapeHtml(r.material)}</td><td contenteditable="true" data-field="q" data-id="${r.id}">${r.q}</td><td contenteditable="true" data-field="scu" data-id="${r.id}">${pad4(r.scu)}</td><td><button data-delete="${r.id}" class="bad">Törlés</button></td>`;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll('[contenteditable]').forEach(cell=>cell.addEventListener('blur',()=>{const id=Number(cell.dataset.id); const row=rows.find(x=>x.id===id); if(!row)return; const f=cell.dataset.field; if(f==='q')row.q=cleanInt(cell.textContent)??row.q; else if(f==='scu')row.scu=cleanScu(cell.textContent)??row.scu; else row.material=cell.textContent.trim()||row.material; renderRows();}));
+  tbody.querySelectorAll('button[data-delete]').forEach(btn=>btn.onclick=()=>{rows=rows.filter(x=>x.id!==Number(btn.dataset.delete)); renderRows();});
+}
+el('btnClearRows').onclick=()=>{if(confirm('Biztos törlöd a tételes listát?')){rows=[];rowId=1;renderRows();el('summaryText').value='';}};
+function qBand(q){q=Number(q); if(q<=399)return'Q 0-399'; if(q<=599)return'Q 400-599'; if(q<=699)return'Q 600-699'; if(q<=799)return'Q 700-799'; if(q<=899)return'Q 800-899'; if(q<=949)return'Q 900-949'; if(q<=998)return'Q 950-998'; return'Q 999-1000';}
+function bandOrder(b){return ['Q 0-399','Q 400-599','Q 600-699','Q 700-799','Q 800-899','Q 900-949','Q 950-998','Q 999-1000'].indexOf(b);}
+function makeSummary(){const map=new Map(); for(const r of rows){const mat=String(r.material||'').trim(); const band=qBand(r.q); const key=mat+'||'+band; if(!map.has(key))map.set(key,{material:mat,band,scu:0,count:0}); const item=map.get(key); item.scu+=Number(r.scu)||0; item.count++;} return [...map.values()].sort((a,b)=>a.material.localeCompare(b.material,'hu')||bandOrder(a.band)-bandOrder(b.band));}
+el('btnFinish').onclick=()=>{stopOcr(); const arr=makeSummary(); el('summaryText').value=arr.map(x=>`${x.material} | ${x.band} | ${pad4(x.scu)} SCU`).join('\n'); setStatus(`Összesítés kész. Sorok: ${arr.length}`, 'ok');};
+el('btnCopySummary').onclick=async()=>{const txt=el('summaryText').value; if(!txt){setStatus('Nincs másolható összesítés.', 'no'); return;} await navigator.clipboard.writeText(txt); setStatus('Végső lista vágólapra másolva.', 'ok');};
+function download(name,content,type='text/plain'){const blob=new Blob([content],{type}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);}
+el('btnDownloadSummary').onclick=()=>download('sc_cargo_lift_summary.txt',el('summaryText').value||'','text/plain;charset=utf-8');
+el('btnDownloadJson').onclick=()=>download('sc_cargo_lift_summary.json',JSON.stringify(makeSummary(),null,2),'application/json;charset=utf-8');
+el('btnDownloadRaw').onclick=()=>{const header='id,material,q,scu,source,time,raw\n'; const csv=header+rows.map(r=>[r.id,r.material,r.q,pad4(r.scu),r.source,r.time,r.raw].map(csvCell).join(',')).join('\n'); download('sc_cargo_lift_raw.csv',csv,'text/csv;charset=utf-8');};
+function csvCell(v){return '"'+String(v??'').replace(/"/g,'""')+'"';}
+document.addEventListener('keydown',ev=>{if(ev.code==='Space'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){ev.preventDefault(); el('btnRecord').click();} if(ev.code==='Enter'&&ev.ctrlKey){el('btnFinish').click();}});
+window.addEventListener('beforeunload',async()=>{try{if(worker)await worker.terminate();}catch(e){}});
+
+</script>
+</body>
+</html>
